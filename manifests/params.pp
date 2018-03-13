@@ -133,7 +133,11 @@ class postgresql::params inherits postgresql::globals {
       } else {
         $needs_initdb = pick($needs_initdb, false)
         $service_name = $::operatingsystem ? {
-          'Debian' => pick($service_name, 'postgresql'),
+          'Debian' => $::lsbmajdistrelease ? {
+            /^8/ => pick($service_name, "postgresql@${version}-${cluster}"),
+            /^9/ => pick($service_name, "postgresql@${version}-${cluster}"),
+            default => pick($service_name, "postgresql"),
+          },
           'Ubuntu' => $::lsbmajdistrelease ? {
             /^10/ => pick($service_name, "postgresql-${version}"),
             default => pick($service_name, 'postgresql'),
@@ -165,10 +169,11 @@ class postgresql::params inherits postgresql::globals {
 
       $bindir                 = pick($bindir, "/usr/lib/postgresql/${version}/bin")
       $datadir                = pick($datadir, "/var/lib/postgresql/${version}/main")
+      $cluster                = split($datadir, '/')[-1]
       $confdir                = pick($confdir, "/etc/postgresql/${version}/main")
       if $::operatingsystem == 'Debian' and versioncmp($::operatingsystemrelease, '8.0') >= 0 {
         # Jessie uses systemd
-        $service_status = pick($service_status, "/usr/sbin/service ${service_name}@*-main status")
+        $service_status = pick($service_status, "/usr/sbin/service ${service_name} status")
       } elsif $::operatingsystem == 'Ubuntu' and versioncmp($::operatingsystemrelease, '15.04') >= 0 {
         # Ubuntu releases since vivid use systemd
         $service_status = pick($service_status, "/usr/sbin/service ${service_name} status")
