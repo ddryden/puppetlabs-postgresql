@@ -79,7 +79,7 @@ class postgresql::server::initdb {
     # The xlogdir need to be present before initdb runs.
     # If xlogdir is default it's created by package installer
     if($xlogdir) {
-      $ic_xlog = "--xlogdir '${xlogdir}'"
+      $ic_xlog = "-X '${xlogdir}'"
       $require_before_initdb = [$datadir, $xlogdir]
     } else {
       $ic_xlog = ''
