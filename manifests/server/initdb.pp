@@ -13,6 +13,7 @@ class postgresql::server::initdb {
   $psql_path      = $postgresql::server::psql_path
   $port           = $postgresql::server::port
   $module_workdir = $postgresql::server::module_workdir
+  $version        = $postgresql::params::version
 
   # Set the defaults for the postgresql_psql resource
   Postgresql_psql {
@@ -27,7 +28,6 @@ class postgresql::server::initdb {
     $seltype = 'postgresql_db_t'
     $logdir_type = 'postgresql_log_t'
   }
-
   else {
     $seltype = undef
     $logdir_type = undef
@@ -69,45 +69,55 @@ class postgresql::server::initdb {
     # We optionally add the locale switch if specified. Older versions of the
     # initdb command don't accept this switch. So if the user didn't pass the
     # parameter, lets not pass the switch at all.
-    $ic_base = "${initdb_path} --encoding '${encoding}' --pgdata '${datadir}'"
-    $ic_xlog = $xlogdir ? {
-      undef   => $ic_base,
-      default => "${ic_base} --xlogdir '${xlogdir}'"
+    $ic_base = "--pgdata '${datadir}'"
+
+    $ic_encoding = $encoding ? {
+      undef   => '',
+      default => "--encoding '${encoding}'"
     }
 
     # The xlogdir need to be present before initdb runs.
     # If xlogdir is default it's created by package installer
     if($xlogdir) {
+      $ic_xlog = "-X '${xlogdir}'"
       $require_before_initdb = [$datadir, $xlogdir]
     } else {
+      $ic_xlog = ''
       $require_before_initdb = [$datadir]
     }
 
     $ic_locale = $locale ? {
-      undef   => $ic_xlog,
-      default => "${ic_xlog} --locale '${locale}'"
+      undef   => '',
+      default => "--locale '${locale}'"
     }
 
-    $initdb_command = $data_checksums ? {
-      undef   => $ic_locale,
-      false   => $ic_locale,
-      default => "${ic_locale} --data-checksums"
+    $ic_checksums = $data_checksums ? {
+      undef   => '',
+      false   => '',
+      default => '--data-checksums'
     }
 
-    # This runs the initdb command, we use the existance of the PG_VERSION
-    # file to ensure we don't keep running this command.
-    exec { 'postgresql_initdb':
-      command   => $initdb_command,
-      creates   => "${datadir}/PG_VERSION",
-      user      => $user,
-      group     => $group,
-      logoutput => on_failure,
-      require   => File[$require_before_initdb],
-      cwd       => $module_workdir,
-    }
+    $initdb_command = "${initdb_path} ${ic_base} ${ic_encoding} ${ic_xlog} ${ic_locale} ${ic_checksums}"
+
     # The package will take care of this for us the first time, but if we
     # ever need to init a new db we need to copy these files explicitly
-    if $::operatingsystem == 'Debian' or $::operatingsystem == 'Ubuntu' {
+    if $::osfamily == 'Debian' {
+      $pcc = '/usr/bin/pg_createcluster'
+      $cluster = split($datadir, '/')[-1]
+      $pg_createcluster_options = "-u ${user} -g ${group} -p ${port} ${ic_encoding} -d ${datadir} ${version} ${cluster}"
+      $initdb_options = "${ic_xlog} ${ic_locale} ${ic_checksums}"
+      $init_command = "${pcc} ${pg_createcluster_options} -- ${initdb_options}"
+
+      # In Debian based distrobutions we have access to pg_createcluster and
+      # should use that over plain initdb so that other pg_*cluster tools work.
+      exec { 'postgresql_initdb':
+        command   => $init_command,
+        creates   => "${datadir}/PG_VERSION",
+        logoutput => on_failure,
+        require   => File[$require_before_initdb],
+        cwd       => $module_workdir,
+      }
+
       if $::operatingsystemrelease =~ /^6/ or $::operatingsystemrelease =~ /^7/ or $::operatingsystemrelease =~ /^10\.04/ or $::operatingsystemrelease =~ /^12\.04/ {
         file { 'server.crt':
           ensure  => file,
@@ -127,6 +137,19 @@ class postgresql::server::initdb {
           mode    => '0600',
           require => Exec['postgresql_initdb'],
         }
+      }
+    }
+    else {
+      # This runs the initdb command, we use the existance of the PG_VERSION
+      # file to ensure we don't keep running this command.
+      exec { 'postgresql_initdb':
+        command   => $initdb_command,
+        creates   => "${datadir}/PG_VERSION",
+        user      => $user,
+        group     => $group,
+        logoutput => on_failure,
+        require   => File[$require_before_initdb],
+        cwd       => $module_workdir,
       }
     }
   } elsif $encoding != undef {
